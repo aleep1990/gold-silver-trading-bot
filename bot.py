@@ -1,3 +1,8 @@
+"""
+Gold & Silver Trading Bot - Professional Risk Management Strategy
+All comments are in English for clarity.
+"""
+
 import os
 import requests
 from bs4 import BeautifulSoup
@@ -5,6 +10,7 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 from telegram import Bot
+from telegram.error import TelegramError
 import asyncio
 import logging
 import pandas as pd
@@ -13,27 +19,51 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from ta.volatility import AverageTrueRange
 import time
+import sys
 
-# ========== تنظیمات اولیه ==========
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# =====================================================
+# 1. LOGGING CONFIGURATION - Enhanced for debugging
+# =====================================================
+
+logging.basicConfig(
+    level=logging.DEBUG,  # Changed to DEBUG for more details
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# =====================================================
+# 2. ENVIRONMENT VARIABLES - Check them immediately
+# =====================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-if not TOKEN or not CHAT_ID:
-    logger.warning("⚠️ TELEGRAM_TOKEN یا CHAT_ID تنظیم نشده است!")
+logger.info(f"🔍 TELEGRAM_TOKEN exists: {'Yes' if TOKEN else 'NO!'}")
+logger.info(f"🔍 CHAT_ID exists: {'Yes' if CHAT_ID else 'NO!'}")
+logger.info(f"🔍 TOKEN length: {len(TOKEN) if TOKEN else 0}")
 
-# ========== تنظیمات مدیریت ریسک - سناریوی حرفه‌ای ==========
+if not TOKEN or not CHAT_ID:
+    logger.error("❌ CRITICAL: TELEGRAM_TOKEN or CHAT_ID is not set!")
+    logger.error("❌ Please check GitHub Secrets configuration.")
+    sys.exit(1)
+
+# =====================================================
+# 3. RISK MANAGEMENT CONFIGURATION
+# =====================================================
+
 class RiskConfigProfessional:
+    """Professional risk management configuration."""
     MAX_POSITION_SIZE = 0.12
     STOP_LOSS = 0.025
     TAKE_PROFIT = 0.05
     MIN_CONFIDENCE = 68
     MAX_DAILY_LOSS = 0.04
-    NAME = "حرفه‌ای"
+    NAME = "Professional"
 
-# ========== کلاس مدیریت ریسک و معاملات ==========
+# =====================================================
+# 4. TRADING SIMULATOR CLASS (simplified for debugging)
+# =====================================================
+
 class TradingSimulator:
     def __init__(self, initial_capital=10000, config=RiskConfigProfessional):
         self.initial_capital = initial_capital
@@ -163,7 +193,7 @@ class TradingSimulator:
         }
         
         self.positions[symbol] = position
-        logger.info(f"📈 {timestamp.strftime('%Y-%m-%d %H:%M')} - {signal} {symbol} @ {price:.2f} | حجم: {position_size:.4f}")
+        logger.info(f"📈 {timestamp.strftime('%Y-%m-%d %H:%M')} - {signal} {symbol} @ {price:.2f} | Size: {position_size:.4f}")
         return position
     
     def close_position(self, symbol, current_price, timestamp, exit_reason):
@@ -211,7 +241,7 @@ class TradingSimulator:
         
         del self.positions[symbol]
         
-        logger.info(f"📉 {timestamp.strftime('%Y-%m-%d %H:%M')} - {exit_reason} {symbol} @ {current_price:.2f} | سود/زیان: {pnl_amount:.2f} ({pnl_percent*100:+.2f}%)")
+        logger.info(f"📉 {timestamp.strftime('%Y-%m-%d %H:%M')} - {exit_reason} {symbol} @ {current_price:.2f} | P&L: {pnl_amount:.2f} ({pnl_percent*100:+.2f}%)")
         return trade
     
     def update_positions(self, df, current_idx):
@@ -269,7 +299,7 @@ class TradingSimulator:
     
     def process_market_data(self, df, symbol='GOLD'):
         if df.empty or len(df) < 50:
-            logger.warning(f"⚠️ داده کافی برای {symbol} وجود ندارد")
+            logger.warning(f"⚠️ Insufficient data for {symbol}")
             return
         
         last_idx = len(df) - 1
@@ -331,8 +361,12 @@ class TradingSimulator:
             'trades': self.trades[-5:]
         }
 
-# ========== توابع دریافت داده ==========
+# =====================================================
+# 5. DATA FETCHING FUNCTIONS
+# =====================================================
+
 def get_iran_gold_18k():
+    """Fetch Iran 18-karat gold price from tgju.org."""
     try:
         url = "https://www.tgju.org/profile/geram18"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -353,10 +387,11 @@ def get_iran_gold_18k():
         
         return None
     except Exception as e:
-        logger.error(f"خطا در دریافت طلای ایران: {e}")
+        logger.error(f"Error fetching Iran gold price: {e}")
         return None
 
 def get_market_data(ticker, days=60):
+    """Fetch market data from Yahoo Finance."""
     try:
         ticker_obj = yf.Ticker(ticker)
         hist = ticker_obj.history(period=f"{days}d")
@@ -364,11 +399,15 @@ def get_market_data(ticker, days=60):
             return None
         return hist
     except Exception as e:
-        logger.error(f"خطا در دریافت داده‌های {ticker}: {e}")
+        logger.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-# ========== توابع گزارش و ارسال ==========
+# =====================================================
+# 6. REPORT GENERATION FUNCTIONS
+# =====================================================
+
 def generate_report(simulator_gold, simulator_silver, iran_gold_price):
+    """Generate a comprehensive performance report for Telegram."""
     now = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d %H:%M:%S")
     
     metrics_gold = simulator_gold.get_performance_metrics()
@@ -378,54 +417,54 @@ def generate_report(simulator_gold, simulator_silver, iran_gold_price):
     total_return = ((metrics_gold['final_capital'] + metrics_silver['final_capital']) / 20000 - 1) * 100
     
     report = f"""
-🧠 **ربات معامله‌گر هوشمند طلا و نقره**
-⏰ **زمان:** {now}
-💰 **سرمایه اولیه:** $۲۰,۰۰۰ (۱۰,۰۰۰ طلا + ۱۰,۰۰۰ نقره)
-📊 **استراتژی:** سناریوی حرفه‌ای (حد ضرر ۲.۵٪ - حد سود ۵٪)
+🧠 **Gold & Silver Intelligent Trading Bot**
+⏰ **Time:** {now}
+💰 **Initial Capital:** $20,000 ($10,000 Gold + $10,000 Silver)
+📊 **Strategy:** Professional Scenario (2.5% Stop Loss - 5% Take Profit)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🇮🇷 **طلای ۱۸ عیار ایران:** {iran_gold_price:,} ریال
+🇮🇷 **Iran 18-Karat Gold:** {iran_gold_price:,} Rials
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📌 **طلای جهانی (GC=F):**
-💰 سرمایه فعلی: ${metrics_gold['final_capital']:,.2f}
-📈 بازده کل: {metrics_gold['total_return']:+.2f}%
-📊 نرخ موفقیت: {metrics_gold['win_rate']:.1f}%
-🎯 نسبت سود/ضرر: {metrics_gold['profit_factor']:.2f}
-📉 حداکثر ریزش: {metrics_gold['max_drawdown']:.2f}%
-📊 نسبت شارپ: {metrics_gold['sharpe_ratio']:.2f}
-🔄 تعداد معاملات: {metrics_gold['total_trades']}
-✅ معاملات موفق: {metrics_gold['winning_trades']}
-❌ معاملات ناموفق: {metrics_gold['losing_trades']}
+📌 **Gold (GC=F):**
+💰 Current Capital: ${metrics_gold['final_capital']:,.2f}
+📈 Total Return: {metrics_gold['total_return']:+.2f}%
+📊 Win Rate: {metrics_gold['win_rate']:.1f}%
+🎯 Profit Factor: {metrics_gold['profit_factor']:.2f}
+📉 Max Drawdown: {metrics_gold['max_drawdown']:.2f}%
+📊 Sharpe Ratio: {metrics_gold['sharpe_ratio']:.2f}
+🔄 Total Trades: {metrics_gold['total_trades']}
+✅ Winning Trades: {metrics_gold['winning_trades']}
+❌ Losing Trades: {metrics_gold['losing_trades']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📌 **نقره جهانی (XAGUSD=X):**
-💰 سرمایه فعلی: ${metrics_silver['final_capital']:,.2f}
-📈 بازده کل: {metrics_silver['total_return']:+.2f}%
-📊 نرخ موفقیت: {metrics_silver['win_rate']:.1f}%
-🎯 نسبت سود/ضرر: {metrics_silver['profit_factor']:.2f}
-📉 حداکثر ریزش: {metrics_silver['max_drawdown']:.2f}%
-📊 نسبت شارپ: {metrics_silver['sharpe_ratio']:.2f}
-🔄 تعداد معاملات: {metrics_silver['total_trades']}
-✅ معاملات موفق: {metrics_silver['winning_trades']}
-❌ معاملات ناموفق: {metrics_silver['losing_trades']}
+📌 **Silver (XAGUSD=X):**
+💰 Current Capital: ${metrics_silver['final_capital']:,.2f}
+📈 Total Return: {metrics_silver['total_return']:+.2f}%
+📊 Win Rate: {metrics_silver['win_rate']:.1f}%
+🎯 Profit Factor: {metrics_silver['profit_factor']:.2f}
+📉 Max Drawdown: {metrics_silver['max_drawdown']:.2f}%
+📊 Sharpe Ratio: {metrics_silver['sharpe_ratio']:.2f}
+🔄 Total Trades: {metrics_silver['total_trades']}
+✅ Winning Trades: {metrics_silver['winning_trades']}
+❌ Losing Trades: {metrics_silver['losing_trades']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📊 **جمع کل سرمایه:**
-💰 سرمایه کل: ${total_capital + 20000:,.2f}
-📈 بازده کل: {total_return:+.2f}%
+📊 **Combined Portfolio:**
+💰 Total Capital: ${total_capital + 20000:,.2f}
+📈 Total Return: {total_return:+.2f}%
 
-📝 **۵ معامله اخیر طلا:**
+📝 **Last 5 Gold Trades:**
 """
     for trade in metrics_gold['trades'][-5:]:
         report += f"• {trade['exit_time'].strftime('%Y-%m-%d')} | {trade['type']} | {trade['pnl_percent']:+.2f}% | {trade['exit_reason']}\n"
     
     report += f"""
-📝 **۵ معامله اخیر نقره:**
+📝 **Last 5 Silver Trades:**
 """
     for trade in metrics_silver['trades'][-5:]:
         report += f"• {trade['exit_time'].strftime('%Y-%m-%d')} | {trade['type']} | {trade['pnl_percent']:+.2f}% | {trade['exit_reason']}\n"
@@ -433,68 +472,196 @@ def generate_report(simulator_gold, simulator_silver, iran_gold_price):
     report += f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🛡️ **قوانین مدیریت ریسک (سناریوی حرفه‌ای):**
-• حداکثر حجم هر معامله: ۱۲٪ سرمایه
-• حد ضرر: ۲.۵٪
-• حد سود: ۵٪ (نسبت ۱:۲)
-• حداقل اطمینان: ۶۸٪
-• حداکثر ضرر روزانه: ۴٪
+🛡️ **Risk Management Rules (Professional Scenario):**
+• Max Position Size: 12% of capital
+• Stop Loss: 2.5%
+• Take Profit: 5% (1:2 risk-reward)
+• Min Confidence: 68%
+• Max Daily Loss: 4%
 
-⚠️ **توجه:** این تحلیل بر اساس داده‌های تاریخی و شبیه‌سازی است و توصیه مالی محسوب نمی‌شود.
+⚠️ **Disclaimer:** This analysis is based on historical data and simulation.
+This is not financial advice. Past performance does not guarantee future results.
 """
     return report.strip()
 
+# =====================================================
+# 7. TELEGRAM SENDING FUNCTION - Enhanced with error handling
+# =====================================================
+
 async def send_telegram(text):
+    """
+    Send a message to Telegram using the bot.
+    Returns True if successful, False otherwise.
+    """
+    logger.info("📤 Attempting to send message to Telegram...")
+    
     if not TOKEN or not CHAT_ID:
-        logger.error("❌ توکن یا چت آیدی تنظیم نشده است!")
+        logger.error("❌ TELEGRAM_TOKEN or CHAT_ID is not set!")
         return False
     
     try:
+        # Create bot instance
         bot = Bot(token=TOKEN)
+        logger.info(f"🤖 Bot created with token: {TOKEN[:10]}...")
+        
+        # Try to get bot info to verify token is valid
+        try:
+            me = await bot.get_me()
+            logger.info(f"✅ Bot authenticated: @{me.username}")
+        except TelegramError as e:
+            logger.error(f"❌ Bot authentication failed: {e}")
+            return False
+        
+        # Send the message
+        logger.info(f"📤 Sending message to chat_id: {CHAT_ID}")
+        
+        # Split message if it's too long
         if len(text) > 4096:
+            logger.info("📝 Message too long, splitting into parts...")
             for i in range(0, len(text), 4096):
-                await bot.send_message(chat_id=CHAT_ID, text=text[i:i+4096], parse_mode='Markdown')
+                await bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=text[i:i+4096],
+                    parse_mode='Markdown'
+                )
         else:
-            await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode='Markdown')
-        logger.info("✅ پیام با موفقیت به تلگرام ارسال شد")
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=text,
+                parse_mode='Markdown'
+            )
+        
+        logger.info("✅ Message successfully sent to Telegram!")
         return True
+        
+    except TelegramError as e:
+        logger.error(f"❌ Telegram error: {e}")
+        return False
     except Exception as e:
-        logger.error(f"❌ خطا در ارسال به تلگرام: {e}")
+        logger.error(f"❌ Unexpected error sending to Telegram: {e}")
         return False
 
-# ========== تابع اصلی ==========
-def main():
-    logger.info("🚀 شروع ربات معامله‌گر با سناریوی حرفه‌ای...")
+# =====================================================
+# 8. TEST TELEGRAM CONNECTION FUNCTION
+# =====================================================
+
+async def test_telegram():
+    """Test function to verify Telegram connection."""
+    logger.info("🧪 Running Telegram connection test...")
     
+    test_message = """
+🧪 **Test Message from Gold/Silver Trading Bot**
+
+✅ If you see this message, the Telegram connection is working!
+✅ Your bot token and chat ID are correct.
+
+⏰ Test time: """ + datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d %H:%M:%S")
+
+    return await send_telegram(test_message)
+
+# =====================================================
+# 9. MAIN FUNCTION
+# =====================================================
+
+def main():
+    """
+    Main entry point for the trading bot.
+    """
+    logger.info("🚀 Starting Trading Bot with Professional Strategy...")
+    
+    # =============================================
+    # STEP 1: Test Telegram connection immediately
+    # =============================================
+    logger.info("📱 Testing Telegram connection first...")
+    
+    try:
+        test_result = asyncio.run(test_telegram())
+        if not test_result:
+            logger.error("❌ Telegram connection test FAILED! Check your token and CHAT_ID.")
+            logger.error("❌ Bot will continue but messages may not be sent.")
+        else:
+            logger.info("✅ Telegram connection test PASSED!")
+    except Exception as e:
+        logger.error(f"❌ Telegram test threw exception: {e}")
+    
+    # =============================================
+    # STEP 2: Fetch data
+    # =============================================
+    logger.info("📊 Fetching market data...")
+    
+    # Iran gold price
     iran_gold = get_iran_gold_18k()
     if not iran_gold:
-        logger.warning("⚠️ قیمت طلای ایران دریافت نشد")
+        logger.warning("⚠️ Iran gold price not available")
         iran_gold = 0
+    else:
+        logger.info(f"✅ Iran gold: {iran_gold:,} Rials")
     
+    # Gold and silver data
     gold_data = get_market_data("GC=F", days=60)
     silver_data = get_market_data("XAGUSD=X", days=60)
     
-    if gold_data is None or silver_data is None:
-        logger.error("❌ داده‌های بازار دریافت نشد")
-        return
+    if gold_data is None:
+        logger.error("❌ Gold data not available")
+        gold_data = pd.DataFrame()
+    
+    if silver_data is None:
+        logger.error("❌ Silver data not available")
+        silver_data = pd.DataFrame()
+    
+    if gold_data.empty or silver_data.empty:
+        logger.warning("⚠️ Some market data is missing, but continuing...")
+    
+    # =============================================
+    # STEP 3: Run simulation
+    # =============================================
+    logger.info("🔄 Running simulations...")
     
     simulator_gold = TradingSimulator(initial_capital=10000, config=RiskConfigProfessional)
     simulator_silver = TradingSimulator(initial_capital=10000, config=RiskConfigProfessional)
     
-    logger.info("🔄 پردازش داده‌های طلا...")
-    simulator_gold.process_market_data(gold_data, 'GOLD')
-    
-    logger.info("🔄 پردازش داده‌های نقره...")
-    simulator_silver.process_market_data(silver_data, 'SILVER')
-    
-    logger.info("📝 تولید گزارش...")
-    report = generate_report(simulator_gold, simulator_silver, iran_gold)
-    print(report)
-    
-    if TOKEN and CHAT_ID:
-        asyncio.run(send_telegram(report))
+    if not gold_data.empty:
+        simulator_gold.process_market_data(gold_data, 'GOLD')
     else:
-        logger.warning("⚠️ توکن یا چت آیدی تنظیم نشده، گزارش فقط در کنسول نمایش داده شد")
+        logger.warning("⚠️ Skipping gold simulation - no data")
+    
+    if not silver_data.empty:
+        simulator_silver.process_market_data(silver_data, 'SILVER')
+    else:
+        logger.warning("⚠️ Skipping silver simulation - no data")
+    
+    # =============================================
+    # STEP 4: Generate and send report
+    # =============================================
+    logger.info("📝 Generating report...")
+    report = generate_report(simulator_gold, simulator_silver, iran_gold)
+    
+    # Always print to console (visible in GitHub Actions logs)
+    print("\n" + "="*80)
+    print("📊 TRADING BOT REPORT")
+    print("="*80)
+    print(report)
+    print("="*80 + "\n")
+    
+    # Send to Telegram
+    if TOKEN and CHAT_ID:
+        logger.info("📤 Sending report to Telegram...")
+        try:
+            result = asyncio.run(send_telegram(report))
+            if result:
+                logger.info("✅ Report sent successfully!")
+            else:
+                logger.error("❌ Failed to send report to Telegram")
+        except Exception as e:
+            logger.error(f"❌ Exception while sending to Telegram: {e}")
+    else:
+        logger.warning("⚠️ TELEGRAM_TOKEN or CHAT_ID not set, report printed to console only")
+    
+    logger.info("🏁 Bot execution complete!")
+
+# =====================================================
+# 10. SCRIPT ENTRY POINT
+# =====================================================
 
 if __name__ == "__main__":
     main()
