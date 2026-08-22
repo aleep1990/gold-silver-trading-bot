@@ -1,0 +1,9 @@
+requests==2.31.0
+beautifulsoup4==4.12.2
+python-telegram-bot==20.7
+pandas==2.1.4
+yfinance==0.2.33
+pytz==2023.3.post1
+lxml==4.9.3
+numpy==1.26.2
+ta==0.10.2
