@@ -1,9 +1,9 @@
 """
-Gold & Silver Trading Bot - Professional Risk Management Strategy
-Fixed version with improved data fetching and fallback
+ربات لایو ترید طلا و نقره با حفظ وضعیت بین اجراها
 """
 
 import os
+import json
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
@@ -19,569 +19,507 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from ta.volatility import AverageTrueRange
 import time
-import sys
-import json
-import urllib.parse
 
-# =====================================================
-# 1. LOGGING CONFIGURATION
-# =====================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# =====================================================
-# 2. ENVIRONMENT VARIABLES
-# =====================================================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-logger.info(f"🔍 TELEGRAM_TOKEN exists: {'Yes' if TOKEN else 'NO!'}")
-logger.info(f"🔍 CHAT_ID exists: {'Yes' if CHAT_ID else 'NO!'}")
+# =============================================
+# تنظیمات مدیریت ریسک
+# =============================================
 
-if not TOKEN or not CHAT_ID:
-    logger.error("❌ CRITICAL: TELEGRAM_TOKEN or CHAT_ID is not set!")
-    logger.error("❌ Please check GitHub Secrets configuration.")
-
-# =====================================================
-# 3. RISK MANAGEMENT CONFIGURATION
-# =====================================================
-
-class RiskConfigProfessional:
+class RiskConfig:
     MAX_POSITION_SIZE = 0.12
     STOP_LOSS = 0.025
     TAKE_PROFIT = 0.05
-    MIN_CONFIDENCE = 68
-    MAX_DAILY_LOSS = 0.04
-    NAME = "Professional"
+    MIN_CONFIDENCE = 60
 
-# =====================================================
-# 4. IMPROVED DATA FETCHING
-# =====================================================
+# =============================================
+# توابع دریافت داده
+# =============================================
 
-def get_market_data_retry(ticker, max_retries=3):
-    """Fetch market data with retry logic and multiple fallback methods."""
-    
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"📊 Attempt {attempt + 1} to fetch {ticker}...")
-            
-            ticker_obj = yf.Ticker(ticker)
-            
-            # Method 1: Try with 5 days interval for latest data
-            hist = ticker_obj.history(period="5d", interval="1d")
-            
-            if hist.empty:
-                # Method 2: Try with 60 days
-                hist = ticker_obj.history(period="60d")
-            
-            if hist.empty:
-                # Method 3: Try with 1 day and 1 minute interval
-                hist = ticker_obj.history(period="1d", interval="1m")
-            
-            if not hist.empty:
-                logger.info(f"✅ Data fetched for {ticker}: {len(hist)} rows")
-                return hist
-            
-            # If we got here, no data was found
-            logger.warning(f"⚠️ No data for {ticker} on attempt {attempt + 1}")
-            
-            # Wait before retry
-            if attempt < max_retries - 1:
-                time.sleep(2)
-                
-        except Exception as e:
-            logger.warning(f"⚠️ Attempt {attempt + 1} failed for {ticker}: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(3)
-    
-    # All retries failed - create fallback data
-    logger.warning(f"⚠️ Using FALLBACK data for {ticker}")
-    return create_fallback_data(ticker)
-
-def create_fallback_data(ticker):
-    """Create minimal fallback data for when Yahoo Finance fails."""
+def create_fallback_data(ticker, days=30):
     now = datetime.now()
-    dates = [now - timedelta(days=i) for i in range(10, 0, -1)]
-    
-    # Base price values
-    if 'GC' in ticker or 'GOLD' in ticker.upper():
-        base_price = 2500.00
-    elif 'XAG' in ticker or 'SILVER' in ticker.upper():
-        base_price = 30.00
+    dates = [now - timedelta(days=i) for i in range(days, 0, -1)]
+    if 'GC' in ticker:
+        base, vol = 2500, 0.015
     else:
-        base_price = 100.00
-    
-    # Create some realistic price movement
-    prices = []
-    for i in range(10):
-        price = base_price * (1 + np.random.normal(0, 0.005) * (i + 1))
-        prices.append(price)
-    
-    df = pd.DataFrame({
-        'Open': [p * 0.998 for p in prices],
-        'High': [p * 1.005 for p in prices],
-        'Low': [p * 0.995 for p in prices],
+        base, vol = 30, 0.02
+    prices = [base]
+    trend = np.random.choice([-1, 1]) * 0.003
+    for i in range(1, days):
+        change = trend + np.random.normal(0, vol)
+        prices.append(max(prices[-1] * (1 + change), prices[-1] * 0.92))
+    return pd.DataFrame({
+        'Open': [p * (1 + np.random.normal(0, 0.003)) for p in prices],
+        'High': [p * (1 + abs(np.random.normal(0, 0.006))) for p in prices],
+        'Low': [p * (1 - abs(np.random.normal(0, 0.006))) for p in prices],
         'Close': prices,
-        'Volume': [1000] * len(prices)
+        'Volume': np.random.randint(500, 5000, days)
     }, index=dates)
-    
-    logger.info(f"📊 Created fallback data for {ticker}")
-    return df
 
-def get_market_data(ticker, days=60):
-    """Main function to get market data with fallback."""
-    return get_market_data_retry(ticker)
+def get_market_data(ticker):
+    for attempt in range(3):
+        try:
+            t = yf.Ticker(ticker)
+            for period in ["5d", "1mo"]:
+                hist = t.history(period=period)
+                if not hist.empty and len(hist) > 5:
+                    return hist
+        except:
+            pass
+        time.sleep(1)
+    return create_fallback_data(ticker, 30)
 
-# =====================================================
-# 5. IRAN GOLD PRICE
-# =====================================================
-
-def get_iran_gold_18k():
-    """Fetch Iran 18-karat gold price from tgju.org."""
+def get_iran_gold():
     try:
         url = "https://www.tgju.org/profile/geram18"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7"
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, "html.parser")
-        
-        # Try multiple selector patterns
-        price = None
-        selectors = [
-            "span[data-col='info.last_trade.PDrrVal']",
-            ".price",
-            ".value",
-            "td.price",
-            "span.price",
-            ".info-price"
-        ]
-        
-        for selector in selectors:
-            element = soup.select_one(selector)
-            if element:
-                text = element.get_text(strip=True).replace(",", "").replace("ریال", "").strip()
-                if text and text.isdigit():
-                    price = int(text)
-                    break
-        
-        if price:
-            logger.info(f"✅ Iran gold: {price:,} Rials")
-            return price
-        
-        # Fallback: search all td elements
-        for td in soup.find_all("td"):
-            text = td.get_text(strip=True).replace(",", "").replace("ریال", "").strip()
-            if text and text.isdigit() and len(text) >= 7:
-                logger.info(f"✅ Iran gold (fallback): {text}")
-                return int(text)
-        
-        logger.warning("⚠️ Iran gold price not found")
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        elem = soup.select_one("span[data-col='info.last_trade.PDrrVal']")
+        if elem:
+            txt = elem.text.replace(",", "").replace("ریال", "").strip()
+            if txt.isdigit():
+                return int(txt)
         return 0
-        
-    except Exception as e:
-        logger.error(f"Error fetching Iran gold: {e}")
+    except:
         return 0
 
-# =====================================================
-# 6. TRADING SIMULATOR (simplified)
-# =====================================================
+# =============================================
+# کلاس معامله‌گر با قابلیت ذخیره/بارگذاری وضعیت
+# =============================================
 
-class TradingSimulator:
-    def __init__(self, initial_capital=10000, config=RiskConfigProfessional):
-        self.initial_capital = initial_capital
-        self.current_capital = initial_capital
-        self.config = config
-        self.trades = []
-        self.positions = {}
-        self.daily_pnl = 0
-        self.total_pnl = 0
-        self.win_count = 0
-        self.loss_count = 0
-        self.peak_capital = initial_capital
+class LiveTrader:
+    def __init__(self, capital=10000):
+        self.initial = capital
+        self.capital = capital
+        self.trades = []          # تاریخچه معاملات بسته‌شده
+        self.open_positions = {}  # پوزیشن‌های باز (برای هر نماد)
+        self.wins = 0
+        self.losses = 0
         self.max_drawdown = 0
-        
+        self.peak = capital
+        self.config = RiskConfig()
+        self.state_file = "state.json"
+        self.load_state()
+    
+    def load_state(self):
+        """بارگذاری وضعیت از فایل (اگر وجود داشته باشد)"""
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, 'r') as f:
+                    data = json.load(f)
+                    self.capital = data.get('capital', self.initial)
+                    self.trades = data.get('trades', [])
+                    self.open_positions = data.get('open_positions', {})
+                    self.wins = data.get('wins', 0)
+                    self.losses = data.get('losses', 0)
+                    self.max_drawdown = data.get('max_drawdown', 0)
+                    self.peak = data.get('peak', self.initial)
+                    logger.info("✅ وضعیت قبلی بارگذاری شد")
+            except Exception as e:
+                logger.warning(f"خطا در بارگذاری وضعیت: {e}")
+    
+    def save_state(self):
+        """ذخیره وضعیت در فایل"""
+        try:
+            data = {
+                'capital': self.capital,
+                'trades': self.trades[-50:],  # فقط ۵۰ معامله آخر
+                'open_positions': self.open_positions,
+                'wins': self.wins,
+                'losses': self.losses,
+                'max_drawdown': self.max_drawdown,
+                'peak': self.peak
+            }
+            with open(self.state_file, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
+            logger.info("✅ وضعیت ذخیره شد")
+        except Exception as e:
+            logger.warning(f"خطا در ذخیره وضعیت: {e}")
+    
     def calculate_position_size(self, price, atr):
         stop_distance = max(self.config.STOP_LOSS * price, atr * 1.5)
-        max_risk = self.current_capital * self.config.STOP_LOSS
-        position_size = max_risk / stop_distance
-        max_position = (self.current_capital * self.config.MAX_POSITION_SIZE) / price
-        position_size = min(position_size, max_position)
-        return max(0, position_size)
+        risk_amount = self.capital * self.config.STOP_LOSS
+        size = risk_amount / stop_distance
+        max_size = (self.capital * self.config.MAX_POSITION_SIZE) / price
+        return max(0, min(size, max_size))
     
-    def get_trading_signal(self, df, current_idx):
-        if current_idx < 20:
+    def get_signal_with_reason(self, df, idx):
+        if idx < 20:
             return None, 0, {}
+        price = df['Close'].iloc[idx]
+        rsi = RSIIndicator(df['Close']).rsi().iloc[idx]
+        macd = MACD(df['Close']).macd_diff().iloc[idx]
+        atr = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range().iloc[idx]
+        atr_pct = (atr / price) * 100
+        sma20 = df['Close'].rolling(20).mean().iloc[idx]
+        sma50 = df['Close'].rolling(50).mean().iloc[idx] if idx > 50 else sma20
         
-        current_price = df['Close'].iloc[current_idx]
-        current_volume = df['Volume'].iloc[current_idx]
-        
-        rsi = RSIIndicator(df['Close'], window=14).rsi().iloc[current_idx]
-        macd = MACD(df['Close']).macd_diff().iloc[current_idx]
-        atr = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range().iloc[current_idx]
-        atr_percent = (atr / current_price) * 100
-        
-        avg_volume = df['Volume'].iloc[current_idx-20:current_idx].mean()
-        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
-        
+        reasons = {}
         score = 0
-        details = {}
         
-        # RSI
         if rsi < 30:
             score += 1
-            details['rsi'] = 'oversold'
+            reasons['RSI'] = f"اشباع فروش ({rsi:.1f}) → خرید"
         elif rsi > 70:
             score -= 1
-            details['rsi'] = 'overbought'
+            reasons['RSI'] = f"اشباع خرید ({rsi:.1f}) → فروش"
         else:
-            details['rsi'] = 'neutral'
+            reasons['RSI'] = f"خنثی ({rsi:.1f})"
         
-        # MACD
         if macd > 0:
             score += 0.5
-            details['macd'] = 'bullish'
+            reasons['MACD'] = f"مثبت ({macd:.3f}) → صعودی"
         else:
             score -= 0.5
-            details['macd'] = 'bearish'
+            reasons['MACD'] = f"منفی ({macd:.3f}) → نزولی"
         
-        # Moving Averages
-        sma_20 = df['Close'].rolling(20).mean().iloc[current_idx]
-        sma_50 = df['Close'].rolling(50).mean().iloc[current_idx] if current_idx > 50 else sma_20
-        
-        if current_price > sma_20 and current_price > sma_50:
+        if price > sma20 and price > sma50:
             score += 0.5
-            details['trend'] = 'bullish'
-        elif current_price < sma_20 and current_price < sma_50:
+            reasons['میانگین'] = "قیمت بالای SMA20 و SMA50 → صعودی"
+        elif price < sma20 and price < sma50:
             score -= 0.5
-            details['trend'] = 'bearish'
+            reasons['میانگین'] = "قیمت پایین SMA20 و SMA50 → نزولی"
         else:
-            details['trend'] = 'neutral'
+            reasons['میانگین'] = "خنثی"
         
-        # Volume
-        if volume_ratio > 1.5 and score > 0:
+        if 0.5 < atr_pct < 4:
             score += 0.5
-            details['volume'] = 'high'
-        elif volume_ratio < 0.5 and score < 0:
+            reasons['ATR'] = f"نوسان مناسب ({atr_pct:.1f}%)"
+        elif atr_pct > 5:
             score -= 0.5
-            details['volume'] = 'low'
+            reasons['ATR'] = f"نوسان بالا ({atr_pct:.1f}%)"
+        else:
+            reasons['ATR'] = f"نوسان کم ({atr_pct:.1f}%)"
+        
+        # دایورجنس ساده
+        if idx > 20:
+            price_prev = df['Close'].iloc[idx-5]
+            rsi_prev = RSIIndicator(df['Close']).rsi().iloc[idx-5]
+            if price < price_prev and rsi > rsi_prev:
+                reasons['دایورجنس'] = "🟢 صعودی (قیمت پایین‌تر، RSI بالاتر) → خرید قوی"
+                score += 1
+            elif price > price_prev and rsi < rsi_prev:
+                reasons['دایورجنس'] = "🔴 نزولی (قیمت بالاتر، RSI پایین‌تر) → فروش قوی"
+                score -= 1
         
         if score >= 2:
-            signal = 'BUY'
-            confidence = min(70 + score * 5, 95)
+            return 'BUY', min(70 + score * 5, 95), reasons
         elif score <= -2:
-            signal = 'SELL'
-            confidence = min(70 + abs(score) * 5, 95)
+            return 'SELL', min(70 + abs(score) * 5, 95), reasons
         else:
-            signal = 'HOLD'
-            confidence = 50
-        
-        return signal, confidence, details
+            return 'HOLD', 50, reasons
     
-    def execute_trade(self, symbol, signal, price, atr, details, timestamp):
-        if signal == 'HOLD':
-            return None
-        
-        if symbol in self.positions:
-            return None
-        
-        position_size = self.calculate_position_size(price, atr)
-        if position_size < 0.001:
-            return None
-        
-        if signal == 'BUY':
-            stop_loss = price * (1 - self.config.STOP_LOSS)
-            take_profit = price * (1 + self.config.TAKE_PROFIT)
-        else:
-            stop_loss = price * (1 + self.config.STOP_LOSS)
-            take_profit = price * (1 - self.config.TAKE_PROFIT)
-        
-        self.positions[symbol] = {
-            'type': signal,
-            'entry_price': price,
-            'position_size': position_size,
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'entry_time': timestamp
-        }
-        
-        logger.info(f"📈 {signal} {symbol} @ {price:.2f} | Size: {position_size:.4f}")
-        return self.positions[symbol]
-    
-    def close_position(self, symbol, current_price, timestamp, exit_reason):
-        if symbol not in self.positions:
-            return None
-        
-        position = self.positions[symbol]
-        
-        if position['type'] == 'BUY':
-            pnl_percent = (current_price - position['entry_price']) / position['entry_price']
-        else:
-            pnl_percent = (position['entry_price'] - current_price) / position['entry_price']
-        
-        pnl_amount = pnl_percent * position['position_size'] * position['entry_price']
-        
-        trade = {
-            'symbol': symbol,
-            'type': position['type'],
-            'pnl_percent': pnl_percent * 100,
-            'pnl_amount': pnl_amount,
-            'exit_reason': exit_reason
-        }
-        self.trades.append(trade)
-        self.current_capital += pnl_amount
-        
-        if pnl_amount > 0:
-            self.win_count += 1
-        else:
-            self.loss_count += 1
-        
-        if self.current_capital > self.peak_capital:
-            self.peak_capital = self.current_capital
-        else:
-            drawdown = (self.peak_capital - self.current_capital) / self.peak_capital * 100
-            self.max_drawdown = max(self.max_drawdown, drawdown)
-        
-        del self.positions[symbol]
-        
-        logger.info(f"📉 {exit_reason} {symbol} @ {current_price:.2f} | P&L: {pnl_percent*100:+.2f}%")
-        return trade
-    
-    def update_positions(self, df, current_idx):
-        current_price = df['Close'].iloc[current_idx]
-        timestamp = df.index[current_idx]
-        exits = []
-        
-        for symbol in list(self.positions.keys()):
-            position = self.positions[symbol]
-            
-            if position['type'] == 'BUY':
-                if current_price <= position['stop_loss']:
-                    exit_reason = 'STOP_LOSS'
-                    exit_price = position['stop_loss']
-                elif current_price >= position['take_profit']:
-                    exit_reason = 'TAKE_PROFIT'
-                    exit_price = position['take_profit']
-                else:
-                    continue
-            else:
-                if current_price >= position['stop_loss']:
-                    exit_reason = 'STOP_LOSS'
-                    exit_price = position['stop_loss']
-                elif current_price <= position['take_profit']:
-                    exit_reason = 'TAKE_PROFIT'
-                    exit_price = position['take_profit']
-                else:
-                    continue
-            
-            trade = self.close_position(symbol, exit_price, timestamp, exit_reason)
-            if trade:
-                exits.append(trade)
-        
-        return exits
-    
-    def check_entry(self, symbol, df, current_idx):
-        if current_idx < 20:
-            return None
-        
-        signal, confidence, details = self.get_trading_signal(df, current_idx)
-        
-        if confidence < self.config.MIN_CONFIDENCE:
-            return None
-        
-        if signal in ['BUY', 'SELL']:
-            atr = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range().iloc[current_idx]
-            current_price = df['Close'].iloc[current_idx]
-            timestamp = df.index[current_idx]
-            return self.execute_trade(symbol, signal, current_price, atr, details, timestamp)
-        
-        return None
-    
-    def process_market_data(self, df, symbol='GOLD'):
+    def process(self, df, symbol):
+        """پردازش داده‌های جدید و بروزرسانی پوزیشن‌ها"""
         if df.empty or len(df) < 20:
-            logger.warning(f"⚠️ Insufficient data for {symbol}")
-            return
+            return None, None
         
         last_idx = len(df) - 1
+        current_price = df['Close'].iloc[last_idx]
+        timestamp = df.index[last_idx]
         
-        # Update existing positions
-        self.update_positions(df, last_idx)
+        new_entries = []
+        closed_trades = []
         
-        # Check for new entry
-        self.check_entry(symbol, df, last_idx)
+        # 1. بررسی پوزیشن‌های باز
+        for sym in list(self.open_positions.keys()):
+            pos = self.open_positions[sym]
+            if pos['type'] == 'BUY':
+                if current_price <= pos['sl']:
+                    closed = self.close_trade(sym, pos['sl'], 'STOP LOSS', timestamp)
+                    if closed:
+                        closed_trades.append(closed)
+                elif current_price >= pos['tp']:
+                    closed = self.close_trade(sym, pos['tp'], 'TAKE PROFIT', timestamp)
+                    if closed:
+                        closed_trades.append(closed)
+            else:  # SELL
+                if current_price >= pos['sl']:
+                    closed = self.close_trade(sym, pos['sl'], 'STOP LOSS', timestamp)
+                    if closed:
+                        closed_trades.append(closed)
+                elif current_price <= pos['tp']:
+                    closed = self.close_trade(sym, pos['tp'], 'TAKE PROFIT', timestamp)
+                    if closed:
+                        closed_trades.append(closed)
+        
+        # 2. ورود به معامله جدید (اگر پوزیشن باز نباشد)
+        if symbol not in self.open_positions:
+            signal, confidence, reasons = self.get_signal_with_reason(df, last_idx)
+            if confidence >= self.config.MIN_CONFIDENCE and signal in ['BUY', 'SELL']:
+                atr = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range().iloc[last_idx]
+                price = df['Close'].iloc[last_idx]
+                size = self.calculate_position_size(price, atr)
+                if size > 0.001:
+                    entry = self.open_trade(symbol, signal, price, size, atr, reasons, confidence, timestamp)
+                    if entry:
+                        new_entries.append(entry)
+        
+        self.save_state()
+        return new_entries, closed_trades
     
-    def get_performance_metrics(self):
-        if len(self.trades) == 0:
+    def open_trade(self, symbol, signal, price, size, atr, reasons, confidence, timestamp):
+        direction = "لانگ (خرید)" if signal == 'BUY' else "شورت (فروش)"
+        if signal == 'BUY':
+            sl = price * (1 - self.config.STOP_LOSS)
+            tp = price * (1 + self.config.TAKE_PROFIT)
+        else:
+            sl = price * (1 + self.config.STOP_LOSS)
+            tp = price * (1 - self.config.TAKE_PROFIT)
+        
+        self.open_positions[symbol] = {
+            'type': signal,
+            'entry': price,
+            'size': size,
+            'sl': sl,
+            'tp': tp,
+            'time': timestamp,
+            'reasons': reasons,
+            'direction': direction,
+            'confidence': confidence
+        }
+        
+        entry_info = {
+            'symbol': symbol,
+            'direction': direction,
+            'entry': price,
+            'size': size,
+            'position_value': size * price,
+            'sl': sl,
+            'tp': tp,
+            'confidence': confidence,
+            'reasons': reasons,
+            'time': timestamp
+        }
+        logger.info(f"📈 ورود {symbol} {direction} @ {price:.2f} | حجم: {size:.4f}")
+        return entry_info
+    
+    def close_trade(self, symbol, price, reason, timestamp):
+        if symbol not in self.open_positions:
+            return None
+        pos = self.open_positions[symbol]
+        if pos['type'] == 'BUY':
+            pnl_percent = (price - pos['entry']) / pos['entry']
+        else:
+            pnl_percent = (pos['entry'] - price) / pos['entry']
+        pnl_amount = pnl_percent * pos['size'] * pos['entry']
+        self.capital += pnl_amount
+        
+        trade_record = {
+            'symbol': symbol,
+            'type': pos['type'],
+            'direction': pos['direction'],
+            'entry': pos['entry'],
+            'exit': price,
+            'size': pos['size'],
+            'position_value': pos['size'] * pos['entry'],
+            'pnl_percent': pnl_percent * 100,
+            'pnl_amount': pnl_amount,
+            'sl': pos['sl'],
+            'tp': pos['tp'],
+            'exit_reason': reason,
+            'entry_time': pos['time'],
+            'exit_time': timestamp,
+            'reasons': pos['reasons'],
+            'confidence': pos['confidence']
+        }
+        self.trades.append(trade_record)
+        if pnl_amount > 0:
+            self.wins += 1
+        else:
+            self.losses += 1
+        if self.capital > self.peak:
+            self.peak = self.capital
+        else:
+            dd = (self.peak - self.capital) / self.peak * 100
+            self.max_drawdown = max(self.max_drawdown, dd)
+        del self.open_positions[symbol]
+        logger.info(f"📉 خروج {symbol} @ {price:.2f} | سود/زیان: {pnl_percent*100:+.2f}%")
+        return trade_record
+    
+    def get_metrics(self):
+        total_trades = len(self.trades)
+        if total_trades == 0:
             return {
-                'total_return': 0,
-                'win_rate': 0,
-                'profit_factor': 0,
-                'sharpe_ratio': 0,
-                'max_drawdown': 0,
-                'total_trades': 0,
-                'winning_trades': 0,
-                'losing_trades': 0,
-                'final_capital': self.current_capital
+                'return': 0, 'win_rate': 0, 'drawdown': 0,
+                'trades': 0, 'wins': 0, 'losses': 0,
+                'capital': self.capital, 'total_pnl': 0,
+                'open_positions': self.open_positions,
+                'last_trades': []
             }
-        
-        total_return = (self.current_capital - self.initial_capital) / self.initial_capital * 100
-        win_rate = self.win_count / len(self.trades) * 100
-        profit_factor = 1.8  # approximate
-        
+        ret = (self.capital - self.initial) / self.initial * 100
+        wr = self.wins / total_trades * 100
+        total_pnl = sum(t['pnl_amount'] for t in self.trades)
         return {
-            'total_return': total_return,
-            'win_rate': win_rate,
-            'profit_factor': profit_factor,
-            'sharpe_ratio': 1.5,
-            'max_drawdown': self.max_drawdown,
-            'total_trades': len(self.trades),
-            'winning_trades': self.win_count,
-            'losing_trades': self.loss_count,
-            'final_capital': self.current_capital,
-            'trades': self.trades[-5:] if self.trades else []
+            'return': ret,
+            'win_rate': wr,
+            'drawdown': self.max_drawdown,
+            'trades': total_trades,
+            'wins': self.wins,
+            'losses': self.losses,
+            'capital': self.capital,
+            'total_pnl': total_pnl,
+            'open_positions': self.open_positions,
+            'last_trades': self.trades[-5:] if self.trades else []
         }
 
-# =====================================================
-# 7. REPORT AND TELEGRAM
-# =====================================================
+# =============================================
+# تولید پیام‌های ورود و خروج به فارسی
+# =============================================
 
-def generate_report(simulator_gold, simulator_silver, iran_gold_price):
-    """Generate performance report."""
+def format_entry_message(entry):
+    reasons_text = "\n".join([f"   • {k}: {v}" for k, v in entry['reasons'].items()])
+    return f"""
+📢 **ورود به معامله {entry['symbol']}**
+
+🧭 جهت: {entry['direction']}
+💰 ارزش معامله: ${entry['position_value']:,.2f}
+📊 قیمت ورود: ${entry['entry']:.2f}
+🎯 حد سود (TP): ${entry['tp']:.2f}
+🛑 حد ضرر (SL): ${entry['sl']:.2f}
+📈 اعتماد به سیگنال: {entry['confidence']}%
+
+🔍 **تحلیل ورود:**
+{reasons_text}
+
+⏰ زمان ورود: {entry['time'].strftime('%Y-%m-%d %H:%M:%S')}
+"""
+
+def format_exit_message(trade):
+    reasons_text = "\n".join([f"   • {k}: {v}" for k, v in trade['reasons'].items()])
+    return f"""
+📢 **خروج از معامله {trade['symbol']}**
+
+🧭 جهت: {trade['direction']}
+💰 ارزش معامله: ${trade['position_value']:,.2f}
+📊 قیمت ورود: ${trade['entry']:.2f} → خروج: ${trade['exit']:.2f}
+📈 سود/زیان: {trade['pnl_percent']:+.2f}% (${trade['pnl_amount']:+.2f})
+📉 دلیل خروج: {trade['exit_reason']}
+
+🔍 **تحلیل ورود (مرجع):**
+{reasons_text}
+
+⏰ زمان خروج: {trade['exit_time'].strftime('%Y-%m-%d %H:%M:%S')}
+"""
+
+def format_status_report(gold_metrics, silver_metrics, iran_price):
     now = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d %H:%M:%S")
     
-    metrics_gold = simulator_gold.get_performance_metrics()
-    metrics_silver = simulator_silver.get_performance_metrics()
+    # جمع‌آوری وضعیت پوزیشن‌های باز
+    open_positions_text = ""
+    if gold_metrics['open_positions']:
+        for sym, pos in gold_metrics['open_positions'].items():
+            open_positions_text += f"• {sym}: {pos['direction']} @ ${pos['entry']:.2f} | TP: ${pos['tp']:.2f} | SL: ${pos['sl']:.2f}\n"
+    if silver_metrics['open_positions']:
+        for sym, pos in silver_metrics['open_positions'].items():
+            open_positions_text += f"• {sym}: {pos['direction']} @ ${pos['entry']:.2f} | TP: ${pos['tp']:.2f} | SL: ${pos['sl']:.2f}\n"
+    if not open_positions_text:
+        open_positions_text = "هیچ پوزیشن بازی وجود ندارد. در انتظار سیگنال جدید...\n"
     
-    total_capital = metrics_gold['final_capital'] + metrics_silver['final_capital']
-    total_return = (total_capital / 20000 - 1) * 100
+    total_cap = gold_metrics['capital'] + silver_metrics['capital']
+    total_ret = (total_cap - 20000) / 20000 * 100
+    total_trades = gold_metrics['trades'] + silver_metrics['trades']
     
     report = f"""
-🧠 **Gold & Silver Trading Bot**
-⏰ Time: {now}
-💰 Initial Capital: $20,000 ($10,000 Gold + $10,000 Silver)
+🧠 **گزارش وضعیت لایو تریدینگ**
+⏰ زمان: {now}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🇮🇷 Iran 18K Gold: {iran_gold_price:,} Rials
+🇮🇷 طلای ۱۸ عیار ایران: {iran_price:,} ریال
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📌 **Gold (GC=F):**
-💰 Capital: ${metrics_gold['final_capital']:,.2f}
-📈 Return: {metrics_gold['total_return']:+.2f}%
-📊 Win Rate: {metrics_gold['win_rate']:.1f}%
-📉 Max Drawdown: {metrics_gold['max_drawdown']:.2f}%
-🔄 Trades: {metrics_gold['total_trades']}
+📌 **پوزیشن‌های باز:**
+{open_positions_text}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📌 **Silver (XAGUSD=X):**
-💰 Capital: ${metrics_silver['final_capital']:,.2f}
-📈 Return: {metrics_silver['total_return']:+.2f}%
-📊 Win Rate: {metrics_silver['win_rate']:.1f}%
-📉 Max Drawdown: {metrics_silver['max_drawdown']:.2f}%
-🔄 Trades: {metrics_silver['total_trades']}
+📊 **خلاصه عملکرد:**
+• سرمایه کل: {total_cap:,.2f} دلار
+• بازده کل: {total_ret:+.2f}%
+• کل معاملات: {total_trades}
+• نرخ موفقیت: {((gold_metrics['wins']+silver_metrics['wins'])/max(1,total_trades)*100):.1f}%
+
+📌 طلا: سرمایه {gold_metrics['capital']:,.2f} | بازده {gold_metrics['return']:+.2f}% | معاملات {gold_metrics['trades']}
+📌 نقره: سرمایه {silver_metrics['capital']:,.2f} | بازده {silver_metrics['return']:+.2f}% | معاملات {silver_metrics['trades']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📊 **Total Portfolio:**
-💰 Total Capital: ${total_capital:,.2f}
-📈 Total Return: {total_return:+.2f}%
+🎯 **استراتژی:** ترکیب RSI، MACD، میانگین‌ها، دایورجنس و ATR
+🛡️ **مدیریت ریسک:** حد ضرر ۲.۵٪، حد سود ۵٪، حجم معامله ≤۱۲٪ سرمایه
 
-🛡️ Risk: 2.5% Stop Loss | 5% Take Profit | 12% Position Size
-
-⚠️ **Disclaimer:** This is a simulation, not financial advice.
+⚠️ **توجه:** این شبیه‌سازی است و توصیه‌ی مالی نیست.
 """
     return report.strip()
 
+# =============================================
+# ارسال پیام به تلگرام
+# =============================================
+
 async def send_telegram(text):
-    """Send message to Telegram."""
     if not TOKEN or not CHAT_ID:
-        logger.error("❌ TELEGRAM_TOKEN or CHAT_ID not set!")
         return False
-    
     try:
         bot = Bot(token=TOKEN)
-        
-        # Test authentication
         me = await bot.get_me()
-        logger.info(f"✅ Bot authenticated: @{me.username}")
-        
+        logger.info(f"✅ ربات: @{me.username}")
         if len(text) > 4096:
             for i in range(0, len(text), 4096):
                 await bot.send_message(chat_id=CHAT_ID, text=text[i:i+4096], parse_mode='Markdown')
         else:
             await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode='Markdown')
-        
-        logger.info("✅ Message sent to Telegram!")
         return True
-        
-    except TelegramError as e:
-        logger.error(f"❌ Telegram error: {e}")
-        return False
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"خطا در ارسال: {e}")
         return False
 
-# =====================================================
-# 8. MAIN
-# =====================================================
+# =============================================
+# تابع اصلی
+# =============================================
 
-def main():
-    """Main function."""
-    logger.info("🚀 Starting Trading Bot...")
+async def main():
+    logger.info("🚀 شروع ربات لایو ترید...")
     
-    # 1. Get Iran gold price
-    iran_gold = get_iran_gold_18k()
+    # 1. دریافت داده‌ها
+    iran = get_iran_gold()
+    gold_df = get_market_data("GC=F")
+    silver_df = get_market_data("XAGUSD=X")
     
-    # 2. Get market data
-    logger.info("📊 Fetching market data...")
-    gold_data = get_market_data("GC=F", days=30)
-    silver_data = get_market_data("XAGUSD=X", days=30)
+    # 2. ایجاد نمونه‌های معامله‌گر (وضعیت از فایل بارگذاری می‌شود)
+    trader_gold = LiveTrader(capital=10000)
+    trader_silver = LiveTrader(capital=10000)
     
-    if gold_data is None or gold_data.empty:
-        logger.warning("⚠️ Gold data is empty, using fallback")
-        gold_data = create_fallback_data("GOLD")
+    # 3. پردازش داده‌ها
+    entries_gold, exits_gold = trader_gold.process(gold_df, 'GOLD')
+    entries_silver, exits_silver = trader_silver.process(silver_df, 'SILVER')
     
-    if silver_data is None or silver_data.empty:
-        logger.warning("⚠️ Silver data is empty, using fallback")
-        silver_data = create_fallback_data("SILVER")
+    # 4. ارسال پیام‌های ورود و خروج
+    if entries_gold:
+        for entry in entries_gold:
+            await send_telegram(format_entry_message(entry))
+    if entries_silver:
+        for entry in entries_silver:
+            await send_telegram(format_entry_message(entry))
     
-    # 3. Run simulation
-    logger.info("🔄 Running simulations...")
-    sim_gold = TradingSimulator(initial_capital=10000)
-    sim_silver = TradingSimulator(initial_capital=10000)
+    if exits_gold:
+        for trade in exits_gold:
+            await send_telegram(format_exit_message(trade))
+    if exits_silver:
+        for trade in exits_silver:
+            await send_telegram(format_exit_message(trade))
     
-    sim_gold.process_market_data(gold_data, 'GOLD')
-    sim_silver.process_market_data(silver_data, 'SILVER')
+    # 5. ارسال گزارش وضعیت (همیشه)
+    metrics_gold = trader_gold.get_metrics()
+    metrics_silver = trader_silver.get_metrics()
+    status_report = format_status_report(metrics_gold, metrics_silver, iran)
+    await send_telegram(status_report)
     
-    # 4. Generate report
-    report = generate_report(sim_gold, sim_silver, iran_gold)
-    print("\n" + "="*80)
-    print(report)
-    print("="*80 + "\n")
-    
-    # 5. Send to Telegram
-    if TOKEN and CHAT_ID:
-        logger.info("📤 Sending to Telegram...")
-        result = asyncio.run(send_telegram(report))
-        if result:
-            logger.info("✅ Report sent successfully!")
-        else:
-            logger.error("❌ Failed to send report")
-    else:
-        logger.warning("⚠️ Telegram not configured, report printed to console")
-    
-    logger.info("🏁 Bot execution complete!")
+    logger.info("🏁 پایان اجرا")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
