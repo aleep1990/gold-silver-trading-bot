@@ -11,12 +11,12 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6          # ← نسخه ۶ که با Node.js 24 کار میکنه
       with:
         fetch-depth: 0
     
     - name: Setup Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6      # ← نسخه ۶ که با Node.js 24 کار میکنه
       with:
         python-version: '3.11'
         cache: 'pip'
@@ -30,6 +30,7 @@ jobs:
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
+        FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # ← این هم برای اطمینان اضافه شد
       run: python bot.py
     
     - name: Upload logs on failure
